@@ -4,44 +4,44 @@
 POSITIONAL=()
 while [[ $# -gt 0 ]]
 do
-key="$1"
+  key="$1"
 
-case $key in
+  case $key in
     -i|--SourceInstanceId)
-    SourceInstanceId="$2"
-    shift # past argument
-    shift # past value
-    ;;
+      SourceInstanceId="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -a|--TargetAMI)
-    TargetAMI="$2"
-    shift # past argument
-    shift # past value
-    ;;
+      TargetAMI="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -k|--KeyPair)
-    KeyPair="$2"
-    shift # past argument
-    shift # past value
-    ;;
+      KeyPair="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -g|--TargetSecurityGroupId)
-    TargetSecurityGroupId="$2"
-    shift # past argument
-    shift # past value
-    ;;
+      TargetSecurityGroupId="$2"
+      shift # past argument
+      shift # past value
+      ;;
     -t|--TenancyType)
-    TenancyType="$2"
-    shift # past argument
-    shift # past value
-    ;;
+      TenancyType="$2"
+      shift # past argument
+      shift # past value
+      ;;
     *)    # unknown option
-    POSITIONAL+=("$1") # save it in an array for later
-    shift # past argument
-    ;;
-esac
+      POSITIONAL+=("$1") # save it in an array for later
+      shift # past argument
+      ;;
+  esac
 done
 set -- "${POSITIONAL[@]}" # restore positional parameters
 if [[ -n $1 ]]; then
-    echo "Last line of parameter specified as non-opt/last argument:"
-    tail -1 "$1"
+  echo "Last line of parameter specified as non-opt/last argument:"
+  tail -1 "$1"
 fi
 
 SourceInstanceId=${SourceInstanceId}
