@@ -79,7 +79,6 @@ done <"$SourceInstanceId.txt"
 #echo "${DataVolumes[@]}"
 #echo "${DataDevices[@]}"
 k=${#DataDevices[*]}
-
 for ((i=0; i<$k; i++));
 do
   #  echo "DataDevices$i   ${DataDevices[i]}"
@@ -96,8 +95,13 @@ done
 
 echo "    RootDevice----${RootDevice[@]}"
 echo "    RootVolume----${RootVolume[@]}"
-echo "    DataDevices----${DataDevices[@]}"
-echo "    DataVolumes----${DataVolumes[@]}"
+
+k=${#DataDevices[*]}
+for ((i=0; i<$k; i++));
+do
+  echo "    DataDevices----${DataDevices[i]}"
+  echo "    DataVolumes----${DataVolumes[i]}"
+done
 
 echo "Stopping source EC2..."
 aws ec2 stop-instances --instance-ids $SourceInstanceId
