@@ -21,11 +21,6 @@ do
       shift # past argument
       shift # past value
       ;;
-    # -k|--KeyPair)
-    #   KeyPair="$2"
-    #   shift # past argument
-    #   shift # past value
-    #   ;;
     -g|--TargetSecurityGroupId)
       TargetSecurityGroupId="$2"
       shift # past argument
@@ -47,50 +42,67 @@ if [[ -n $1 ]]; then
   echo "Last line of parameter specified as non-opt/last argument:"
   tail -1 "$1"
 fi
+
+try_function()
+{ echo $1
+  limit=5
+  pass=1
+  result=$(eval $1)
+
+  while [ "$?" -ne 0 ]; do
+    k=$((2**$pass))
+    sleep $k
+    echo "try $pass pass"
+    pass=$(($pass+1))
+    if [ $pass -eq $limit ]; then
+      exit 1
+    fi
+    result=$(eval $1)
+
+  done
+  echo "$result"
+}
+
 begin_time=$(date +%s)
 SourceInstanceId=${SourceInstanceId}
-#TargetAMI="ami-d8578bb5"
 TargetAMI=${TargetAMI}
-#KeyPair="demo"
 KeyPair=${KeyPair}
-#TargetSecurityGroupId="sg-0695ca0de00bdd034"
 TargetSecurityGroupId=${TargetSecurityGroupId}
-#TenancyType=="dedicated"
 TenancyType=${TenancyType}
 echo "Start to convert..."
-SubnetId=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].SubnetId' --output text)
-echo "Source SubnetId = $SubnetId"
-PrivateIpAddress=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].PrivateIpAddress' --output text)
+cmd="aws ec2 describe-instances --instance-ids $SourceInstanceId --query "\'"Reservations[].Instances[].{KeyName:KeyName,AttachmentId:NetworkInterfaces[0].Attachment.AttachmentId, PrivateIpAddress:PrivateIpAddress, NetworkInterfaceId:NetworkInterfaces[0].NetworkInterfaceId,InstanceType:InstanceType,RootDeviceName:RootDeviceName,BlockDeviceMappings:BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}}"\'
+try_function "${cmd}"
+PrivateIpAddress=$(echo "$result"|grep PrivateIpAddress|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+PrivateIpAddress=$(col -b <<< $PrivateIpAddress)
+AttachmentId=$(echo "$result"|grep AttachmentId|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+AttachmentId=$(col -b <<< $AttachmentId)
+NetworkInterfaceId=$(echo "$result"|grep NetworkInterfaceId|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+NetworkInterfaceId=$(col -b <<< $NetworkInterfaceId)
+InstanceType=$(echo "$result"|grep InstanceType|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+InstanceType=$(col -b <<< $InstanceType)
+SourceRootDeviceName=$(echo "$result"|grep RootDeviceName|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+SourceRootDeviceName=$(col -b <<< $SourceRootDeviceName)
+KeyPair=$(echo "$result"|grep KeyName|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+KeyPair=$(col -b <<< $KeyPair)
+echo "KeyPair Name =$KeyPair"
+DataVolumes=($(echo "$result"|grep id|cut -d: -f2|sed 's/"//g' |sed 's/,//g'))
+DataDevices=($(echo "$result"|grep name|cut -d: -f2|sed 's/"//g' |sed 's/,//g'))
 echo "Source PrivateIpAddress = $PrivateIpAddress"
-# AZ=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].Placement.AvailabilityZone' --output text)
-# echo "Source AZ = $AZ"
-InstanceType=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].InstanceType' --output text)
+echo "NetworkInterfaceId = $NetworkInterfaceId"
+cmd="aws ec2 modify-network-interface-attribute --attachment AttachmentId=\"$AttachmentId\",DeleteOnTermination=false --network-interface-id $NetworkInterfaceId"
+try_function "${cmd}"
 echo "Source InstanceType = $InstanceType"
-
-
-SourceRootDeviceName=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].RootDeviceName' --output text)
-#SoueceBlockDataDevices=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}' --output text)>$SourceInstanceId.txt
 echo "Source EBS Mapping:"
-aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}' --output text >$SourceInstanceId.txt
-
-j=0
-while IFS= read line
-do
-  DataVolumes[$j]=$(echo "$line"|awk '{print $1}')
-  DataDevices[$j]=$(echo "$line"|awk '{print $2}')
-  j=$((j+1))
-done <"$SourceInstanceId.txt"
-
-#echo "${DataVolumes[@]}"
-#echo "${DataDevices[@]}"
+echo "${DataVolumes[@]}"
+echo "${DataDevices[@]}"
 k=${#DataDevices[*]}
 for ((i=0; i<$k; i++));
 do
-  #  echo "DataDevices$i   ${DataDevices[i]}"
+  DataDevices[i]=$(col -b <<< ${DataDevices[i]})
   if [ "${DataDevices[i]}" == "$SourceRootDeviceName" ]
   then
-    RootDevice[$i]=$SourceRootDeviceName
-    RootVolume[$i]=${DataVolumes[$i]}
+    RootDevice[$i]="$SourceRootDeviceName"
+    RootVolume[$i]=$(col -b <<< ${DataVolumes[i]})
     unset DataVolumes[i]
     unset DataDevices[i]
     DataVolumes=( "${DataVolumes[@]}" )
@@ -108,52 +120,49 @@ do
   echo "    DataVolumes----${DataVolumes[i]}"
 done
 
-SID=$(aws ec2 describe-instance-attribute --instance-id $SourceInstanceId  --attribute groupSet --output text|egrep GROUPS |cut -f2|awk '{printf"%s " , $0}')
-SourceSecurityGroupId=$(echo $SID|cut -c1-$((${#SID}-1)))
 
-KeyPair=$(aws ec2 describe-instances  --instance-id $SourceInstanceId  --query 'Reservations[].Instances[].KeyName' --output text)
 echo "KeyPair Name = $KeyPair"
-echo "Source Security Groups: $SourceSecurityGroupId"
 
-# get security groups of source instance
-if [ $TargetSecurityGroupId == "S" ];
-then
-  TargetSecurityGroupId=$SourceSecurityGroupId
-else
-  TargetSecurityGroupId=$TargetSecurityGroupId" "$SourceSecurityGroupId
-fi
 echo "Target Security Group: $TargetSecurityGroupId"
-SourceTags=$(aws ec2 describe-instances --instance-id $SourceInstanceId --query 'Reservations[].Instances[].Tags[]')
-
+cmd="aws ec2 describe-instances --instance-id $SourceInstanceId --query "\'"Reservations[].Instances[].Tags[]"\'
+try_function "${cmd}"
+SourceTags=$result
 echo "Source tags:"
 echo "$SourceTags"
 echo "Stopping source EC2..."
-aws ec2 stop-instances --instance-ids $SourceInstanceId
-
-aws ec2 wait instance-stopped --instance-ids  $SourceInstanceId
+cmd="aws ec2 stop-instances --instance-ids $SourceInstanceId"
+try_function "${cmd}"
+cmd="aws ec2 wait instance-stopped --instance-ids $SourceInstanceId"
+try_function "${cmd}"
 echo "EC2 instance $SourceInstanceId is stopped"
 
 echo "Detach source EC2 root device $SourceRootDeviceName ----> ${RootVolume[@]}"
-aws ec2 detach-volume --volume-id ${RootVolume[@]}
+cmd="aws ec2 detach-volume --volume-id ${RootVolume[@]}"
+try_function "${cmd}"
 k=${#DataDevices[*]}
-for ((i=0; i<$k; i++));
+for ((i=1; i<=$k; i++));
 do
+  ${DataVolumes[i]}=$(col -b <<< ${DataVolumes[i]})
+  ${DataDevices[i]}=$(col -b <<< ${DataDevices[i]})
   echo "Detach data volume ${DataVolumes[$i]} as ${DataDevices[$i]} from source EC2 instacne ( $SourceInstanceId )"
-  aws ec2 detach-volume --volume-id ${DataVolumes[i]}
+  cmd="aws ec2 detach-volume --volume-id ${DataVolumes[i]}"
+  try_function "${cmd}"
 done
 
 echo "Terninating source EC2"
-aws ec2 terminate-instances --instance-ids $SourceInstanceId
+cmd="aws ec2 terminate-instances --instance-ids $SourceInstanceId"
+try_function "${cmd}"
 
-aws ec2 wait instance-terminated --instance-ids  $SourceInstanceId
+cmd="aws ec2 wait instance-terminated --instance-ids  $SourceInstanceId"
+try_function "${cmd}"
 echo "EC2 instance $SourceInstanceId is terminated"
-
 
 placement="Tenancy=$TenancyType"
 echo "Creating target EC2"
-aws ec2 run-instances --image-id $TargetAMI --instance-type $InstanceType --placement $placement --private-ip-address $PrivateIpAddress --count 1 --key-name $KeyPair --security-group-ids  $TargetSecurityGroupId --subnet-id $SubnetId >$SourceInstanceId.target
-
-TargetInstanceId=$(cat $SourceInstanceId.target| egrep  InstanceId  |cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+cmd="aws ec2 run-instances --image-id $TargetAMI --instance-type $InstanceType --placement $placement --network-interfaces DeviceIndex=0,NetworkInterfaceId=$NetworkInterfaceId --count 1 --key-name $KeyPair"
+try_function "${cmd}"
+TargetInstanceId=$(echo "$result"| egrep  InstanceId  |cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+TargetInstanceId=$(col -b <<< $TargetInstanceId)
 echo "Target Instance ID = $TargetInstanceId"
 
 # copy source instance tags to target
@@ -161,50 +170,75 @@ a="[]"
 if  [[ $SourceTags != $a ]];
  then
    echo "Copying source tags to target"
-   echo "$SourceTags" > $SourceInstanceId.json
-   aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json
+   #echo "$SourceTags" > $SourceInstanceId.json
+   #aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json
+   cmd="aws ec2 create-tags --resources $TargetInstanceId --tags \"$SourceTags\""
+   try_function "${cmd}"
 fi
 
 #Adding new namne tag
 H_NO=$(echo $PrivateIpAddress | awk -F. '{OFS=""; printf "%.3d%.3d\n",$3,$4}')
 HOST="SVC${H_NO}"
-aws ec2 create-tags --resources $TargetInstanceId --tags Key=Name,Value=$HOST
+cmd="aws ec2 create-tags --resources $TargetInstanceId --tags Key=Name,Value=$HOST"
+try_function "${cmd}"
 
-TargetRootVolumeId=$(aws ec2 describe-instances --instance-ids $TargetInstanceId  --query 'Reservations[].Instances[].BlockDeviceMappings[0].Ebs.VolumeId' --output text)
+if [ $TargetSecurityGroupId != "S" ];
+then
+  cmd="aws ec2 modify-instance-attribute --instance-id $TargetInstanceId --groups $TargetSecurityGroupId"
+  try_function "${cmd}"
+fi
+cmd="aws ec2 describe-instances --instance-ids $TargetInstanceId --query "\'"Reservations[].Instances[].{KeyName:KeyName,AttachmentId:NetworkInterfaces[0].Attachment.AttachmentId, PrivateIpAddress:PrivateIpAddress, NetworkInterfaceId:NetworkInterfaces[0].NetworkInterfaceId,InstanceType:InstanceType,RootDeviceName:RootDeviceName,BlockDeviceMappings:BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}}"\'
+try_function "${cmd}"
+TargetRootDeviceName=$(echo "$result"|grep RootDeviceName|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+
+TargetRootDeviceName=$(col -b <<< $TargetRootDeviceName)
+TargetRootVolumeId=($(echo "$result"|grep id|cut -d: -f2|sed 's/"//g' |sed 's/,//g'))
+TargetRootVolumeId=$(col -b <<< $TargetRootVolumeId)
+AttachmentId=$(echo "$result"|grep AttachmentId|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
+AttachmentId=$(col -b <<< $AttachmentId)
+
 echo "Targe root volume ID =$TargetRootVolumeId"
-
-TargetRootDeviceName=$(aws ec2 describe-instances --instance-ids $TargetInstanceId  --query 'Reservations[].Instances[].RootDeviceName' --output text)
 echo "Target root device name =$TargetRootDeviceName"
-
 echo "Waiting for instance ($HOST--$TargetInstanceId) running ..."
-aws ec2 wait instance-running --instance-ids  $TargetInstanceId
+cmd="aws ec2 wait instance-running --instance-ids  $TargetInstanceId"
+try_function "${cmd}"
 
 echo "Stopping target EC2 ($HOST--$TargetInstanceId)"
-aws ec2 stop-instances --instance-ids $TargetInstanceId
+cmd="aws ec2 stop-instances --instance-ids $TargetInstanceId"
+try_function "${cmd}"
 
-aws ec2 wait instance-stopped --instance-ids  $TargetInstanceId
+cmd="aws ec2 wait instance-stopped --instance-ids  $TargetInstanceId"
+try_function "${cmd}"
+
 echo "EC2 instance ($HOST--$TargetInstanceId) is stopped"
 
 echo "Detach $HOST's root device $TargetRootDeviceName ----> $TargetRootVolumeId"
-aws ec2 detach-volume --volume-id $TargetRootVolumeId
+cmd="aws ec2 detach-volume --volume-id $TargetRootVolumeId"
+try_function "${cmd}"
+
 
 echo "Delete $HOST's root volume: $TargetRootVolumeId"
-aws ec2 delete-volume --volume-id $TargetRootVolumeId
+cmd="aws ec2 delete-volume --volume-id $TargetRootVolumeId"
+try_function "${cmd}"
 
 echo "Attach root volume ${RootVolume[@]} as $TargetRootDeviceName to target EC2 instacne ($HOST--$TargetInstanceId)"
-aws ec2 attach-volume --device $TargetRootDeviceName --instance-id $TargetInstanceId  --volume-id ${RootVolume[@]}
+cmd="aws ec2 attach-volume --device $TargetRootDeviceName --instance-id $TargetInstanceId  --volume-id ${RootVolume[@]}"
+try_function "${cmd}"
 
 k=${#DataDevices[*]}
-for ((i=0; i<$k; i++));
+for ((i=1; i<=$k; i++));
 do
   echo "Attach data volume ${DataVolumes[$i]} as ${DataDevices[$i]} to target EC2 instacne ($HOST--$TargetInstanceId)"
-  aws ec2 attach-volume --device ${DataDevices[$i]} --instance-id $TargetInstanceId  --volume-id ${DataVolumes[$i]}
+  cmd="aws ec2 attach-volume --device ${DataDevices[$i]} --instance-id $TargetInstanceId  --volume-id ${DataVolumes[$i]}"
+  try_function "${cmd}"
 done
 
-echo "Starting $HOST..."
-aws ec2 start-instances --instance-ids $TargetInstanceId
+cmd="aws ec2 modify-network-interface-attribute --attachment AttachmentId=\"$AttachmentId\",DeleteOnTermination=true --network-interface-id $NetworkInterfaceId"
+try_function "${cmd}"
 
-rm $SourceInstanceId.*
+echo "Starting $HOST..."
+cmd="aws ec2 start-instances --instance-ids $TargetInstanceId"
+try_function "${cmd}"
 
 end_time=$(date +%s)
 cost_time=$(($end_time-$begin_time))
