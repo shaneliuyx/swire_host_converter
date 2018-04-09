@@ -1,7 +1,10 @@
 #!/bin/bash
 #example:
-# bash ./con.sh -i i-0abf306a8623699b8  -a ami-d8578bb5  -k demo -g sg-0695ca0de00bdd034  -t dedicated
+# bash ./con_sb.sh -i i-0abf306a8623699b8  -a ami-d8578bb5  -g sg-0695ca0de00bdd034  -t dedicated
 # add Name tag which is followed by Swire's naming convention
+# -g S : copy target security group to target
+# -g sg-xxx : copy target security group to target, and at the same time, add a new additional security group to target
+
 POSITIONAL=()
 while [[ $# -gt 0 ]]
 do
@@ -18,11 +21,11 @@ do
       shift # past argument
       shift # past value
       ;;
-    -k|--KeyPair)
-      KeyPair="$2"
-      shift # past argument
-      shift # past value
-      ;;
+    # -k|--KeyPair)
+    #   KeyPair="$2"
+    #   shift # past argument
+    #   shift # past value
+    #   ;;
     -g|--TargetSecurityGroupId)
       TargetSecurityGroupId="$2"
       shift # past argument
@@ -64,6 +67,7 @@ echo "Source PrivateIpAddress = $PrivateIpAddress"
 InstanceType=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].InstanceType' --output text)
 echo "Source InstanceType = $InstanceType"
 
+
 SourceRootDeviceName=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].RootDeviceName' --output text)
 #SoueceBlockDataDevices=$(aws ec2 describe-instances --instance-ids $SourceInstanceId  --query 'Reservations[].Instances[].BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}' --output text)>$SourceInstanceId.txt
 echo "Source EBS Mapping:"
@@ -104,12 +108,30 @@ do
   echo "    DataVolumes----${DataVolumes[i]}"
 done
 
+SID=$(aws ec2 describe-instance-attribute --instance-id $SourceInstanceId  --attribute groupSet --output text|egrep GROUPS |cut -f2|awk '{printf"%s " , $0}')
+SourceSecurityGroupId=$(echo $SID|cut -c1-$((${#SID}-1)))
+
+KeyPair=$(aws ec2 describe-instances  --instance-id $SourceInstanceId  --query 'Reservations[].Instances[].KeyName' --output text)
+echo "KeyPair Name = $KeyPair"
+echo "Source Security Groups: $SourceSecurityGroupId"
+
+# get security groups of source instance
+if [ $TargetSecurityGroupId == "S" ];
+then
+  TargetSecurityGroupId=$SourceSecurityGroupId
+else
+  TargetSecurityGroupId=$TargetSecurityGroupId" "$SourceSecurityGroupId
+fi
+echo "Target Security Group: $TargetSecurityGroupId"
+SourceTags=$(aws ec2 describe-instances --instance-id $SourceInstanceId --query 'Reservations[].Instances[].Tags[]')
+
+echo "Source tags:"
+echo "$SourceTags"
 echo "Stopping source EC2..."
 aws ec2 stop-instances --instance-ids $SourceInstanceId
 
 aws ec2 wait instance-stopped --instance-ids  $SourceInstanceId
 echo "EC2 instance $SourceInstanceId is stopped"
-
 
 echo "Detach source EC2 root device $SourceRootDeviceName ----> ${RootVolume[@]}"
 aws ec2 detach-volume --volume-id ${RootVolume[@]}
@@ -126,6 +148,7 @@ aws ec2 terminate-instances --instance-ids $SourceInstanceId
 aws ec2 wait instance-terminated --instance-ids  $SourceInstanceId
 echo "EC2 instance $SourceInstanceId is terminated"
 
+
 placement="Tenancy=$TenancyType"
 echo "Creating target EC2"
 aws ec2 run-instances --image-id $TargetAMI --instance-type $InstanceType --placement $placement --private-ip-address $PrivateIpAddress --count 1 --key-name $KeyPair --security-group-ids  $TargetSecurityGroupId --subnet-id $SubnetId >$SourceInstanceId.target
@@ -133,7 +156,16 @@ aws ec2 run-instances --image-id $TargetAMI --instance-type $InstanceType --plac
 TargetInstanceId=$(cat $SourceInstanceId.target| egrep  InstanceId  |cut -d: -f2|sed 's/"//g' |sed 's/,//g')
 echo "Target Instance ID = $TargetInstanceId"
 
-#Adding Namne tag
+# copy source instance tags to target
+a="[]"
+if  [[ $SourceTags != $a ]];
+ then
+   echo "Copying source tags to target"
+   echo "$SourceTags" > $SourceInstanceId.json
+   aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json
+fi
+
+#Adding new namne tag
 H_NO=$(echo $PrivateIpAddress | awk -F. '{OFS=""; printf "%.3d%.3d\n",$3,$4}')
 HOST="SVC${H_NO}"
 aws ec2 create-tags --resources $TargetInstanceId --tags Key=Name,Value=$HOST
@@ -172,10 +204,9 @@ done
 echo "Starting $HOST..."
 aws ec2 start-instances --instance-ids $TargetInstanceId
 
-rm $SourceInstanceId.target
-rm $SourceInstanceId.txt
+rm $SourceInstanceId.*
 
 end_time=$(date +%s)
 cost_time=$(($end_time-$begin_time))
 
-echo "Total execution time: $cost_time s"
+echo "Total execution time: $cost_time seconds"
