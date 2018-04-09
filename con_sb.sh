@@ -9,7 +9,6 @@ POSITIONAL=()
 while [[ $# -gt 0 ]]
 do
   key="$1"
-
   case $key in
     -i|--SourceInstanceId)
       SourceInstanceId="$2"
@@ -58,7 +57,6 @@ try_function()
       exit 1
     fi
     result=$(eval $1)
-
   done
   echo "$result"
 }
@@ -126,7 +124,8 @@ echo "KeyPair Name = $KeyPair"
 echo "Target Security Group: $TargetSecurityGroupId"
 cmd="aws ec2 describe-instances --instance-id $SourceInstanceId --query "\'"Reservations[].Instances[].Tags[]"\'
 try_function "${cmd}"
-SourceTags=$result
+SourceTags="$result"
+#SourceTags=$(col -b <<< $SourceTags)
 echo "Source tags:"
 echo "$SourceTags"
 echo "Stopping source EC2..."
@@ -153,9 +152,15 @@ echo "Terninating source EC2"
 cmd="aws ec2 terminate-instances --instance-ids $SourceInstanceId"
 try_function "${cmd}"
 
-cmd="aws ec2 wait instance-terminated --instance-ids  $SourceInstanceId"
+#cmd="aws ec2 wait instance-terminated --instance-ids  $SourceInstanceId"
+#try_function "${cmd}"
+#echo "EC2 instance $SourceInstanceId is terminated"
+
+cmd="aws ec2 describe-network-interfaces --network-interface-id $NetworkInterfaceId --output text --query "\'"NetworkInterfaces[].Status"\'
 try_function "${cmd}"
-echo "EC2 instance $SourceInstanceId is terminated"
+while [[ $result == "in-use" ]]
+do try_function "${cmd}"
+done
 
 placement="Tenancy=$TenancyType"
 echo "Creating target EC2"
@@ -170,9 +175,9 @@ a="[]"
 if  [[ $SourceTags != $a ]];
  then
    echo "Copying source tags to target"
-   #echo "$SourceTags" > $SourceInstanceId.json
-   #aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json
-   cmd="aws ec2 create-tags --resources $TargetInstanceId --tags \"$SourceTags\""
+   echo "$SourceTags" > $SourceInstanceId.json
+   cmd="aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json"
+   #cmd="aws ec2 create-tags --resources $TargetInstanceId --tags $SourceTags"
    try_function "${cmd}"
 fi
 
@@ -190,7 +195,6 @@ fi
 cmd="aws ec2 describe-instances --instance-ids $TargetInstanceId --query "\'"Reservations[].Instances[].{KeyName:KeyName,AttachmentId:NetworkInterfaces[0].Attachment.AttachmentId, PrivateIpAddress:PrivateIpAddress, NetworkInterfaceId:NetworkInterfaces[0].NetworkInterfaceId,InstanceType:InstanceType,RootDeviceName:RootDeviceName,BlockDeviceMappings:BlockDeviceMappings[].{name:DeviceName,id:Ebs.VolumeId}}"\'
 try_function "${cmd}"
 TargetRootDeviceName=$(echo "$result"|grep RootDeviceName|cut -d: -f2|sed 's/"//g' |sed 's/,//g')
-
 TargetRootDeviceName=$(col -b <<< $TargetRootDeviceName)
 TargetRootVolumeId=($(echo "$result"|grep id|cut -d: -f2|sed 's/"//g' |sed 's/,//g'))
 TargetRootVolumeId=$(col -b <<< $TargetRootVolumeId)
