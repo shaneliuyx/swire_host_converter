@@ -1,6 +1,7 @@
 #!/bin/bash
 #example:
-# bash ./con_sb.sh -i i-0abf306a8623699b8  -a ami-d8578bb5  -g sg-0695ca0de00bdd034  -t dedicated
+# bash ./con_sb.sh -i i-0abf306a8623699b8  -a ami-d8578bb5  -g sg-0695ca0de00bdd034  -t dedicated & > 2>&1 > output_`date +"\%Y\%m\%d"`.log
+
 # add Name tag which is followed by Swire's naming convention
 # -g S : copy target security group to target
 # -g sg-xxx : copy target security group to target, and at the same time, add a new additional security group to target
@@ -125,7 +126,8 @@ echo "Target Security Group: $TargetSecurityGroupId"
 cmd="aws ec2 describe-instances --instance-id $SourceInstanceId --query "\'"Reservations[].Instances[].Tags[]"\'
 try_function "${cmd}"
 SourceTags="$result"
-#SourceTags=$(col -b <<< $SourceTags)
+SourceTags=$(col -b <<< $SourceTags)
+SourceTags=$(echo $SourceTags |sed 's/"/\\\"/g')
 echo "Source tags:"
 echo "$SourceTags"
 echo "Stopping source EC2..."
@@ -175,9 +177,9 @@ a="[]"
 if  [[ $SourceTags != $a ]];
  then
    echo "Copying source tags to target"
-   echo "$SourceTags" > $SourceInstanceId.json
-   cmd="aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json"
-   #cmd="aws ec2 create-tags --resources $TargetInstanceId --tags $SourceTags"
+   #echo "$SourceTags" > $SourceInstanceId.json
+   #cmd="aws ec2 create-tags --resources $TargetInstanceId --tags file://$SourceInstanceId.json"
+   cmd="aws ec2 create-tags --resources $TargetInstanceId --tags \"$SourceTags\""
    try_function "${cmd}"
 fi
 
