@@ -185,7 +185,7 @@ fi
 
 #Adding new namne tag
 H_NO=$(echo $PrivateIpAddress | awk -F. '{OFS=""; printf "%.3d%.3d\n",$3,$4}')
-HOST="SVC${H_NO}"
+HOST="SRC${H_NO}"
 cmd="aws ec2 create-tags --resources $TargetInstanceId --tags Key=Name,Value=$HOST"
 try_function "${cmd}"
 
