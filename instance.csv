@@ -1,0 +1,9 @@
+SourceInstanceId,SourceInstanceName,SourceInstanceIP,TargetAMI,HostId,TargetSecurityGroupId,TargetHostname,TenancyType
+,,172.24.18.219,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.26.219,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.21.59,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.26.29,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.18.188,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.18.189,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.26.188,ami-0e1038e30789428a9,,,,dedicated
+,,172.24.26.189,ami-0e1038e30789428a9,,,,dedicated
